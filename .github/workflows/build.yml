@@ -18,26 +18,47 @@ jobs:
         with:
           python-version: 3.11
           buildozer-cmd: |
+            echo "=== PREPARING ANDROID DEPENDENCIES ==="
+
+            buildozer -v android debug || true
+
+            echo "=== LOCATING LIBTHORVG ==="
+
             python - <<'PY'
             from pathlib import Path
             import re
 
-            recipes = list(Path(".buildozer").rglob(
-                "pythonforandroid/recipes/libthorvg/__init__.py"
-            ))
+            roots = [
+                Path(".buildozer"),
+                Path.home() / ".local",
+            ]
+
+            recipes = []
+
+            for root in roots:
+                if root.exists():
+                    recipes.extend(
+                        p for p in root.rglob("__init__.py")
+                        if p.parent.name == "libthorvg"
+                    )
 
             if not recipes:
-                raise SystemExit("libthorvg recipe not found")
+                raise SystemExit(
+                    "ERROR: libthorvg was not found after preparation."
+                )
 
             recipe = recipes[0]
+            print("Recipe:", recipe)
+
             source = recipe.read_text()
 
-            source = source.replace(
-                "-Dextra=opengl_es,lottie_exp,openmp",
-                "-Dextra=opengl_es,lottie_exp"
+            source = re.sub(
+                r'(-Dextra=[^"\n]*),openmp',
+                r'\1',
+                source
             )
 
-            source, count = re.subn(
+            source = re.sub(
                 r'(?ms)^[ \t]*# copy libomp\.so.*?'
                 r'^[ \t]*shprint\(sh\.cp, libomp, join\("install", "lib"\)\)\n?',
                 '',
@@ -45,10 +66,11 @@ jobs:
             )
 
             recipe.write_text(source)
-            print("Patched:", recipe)
-            print("Removed OpenMP copy blocks:", count)
+
+            print("=== LIBTHORVG PATCH APPLIED ===")
             PY
 
+            echo "=== BUILDING APK ==="
             buildozer -v android debug
 
       - name: Upload artifacts
