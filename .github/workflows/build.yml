@@ -1,85 +1,20 @@
-name: Build Android APK
-
 on:
   push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
-  workflow_dispatch:
+    branches: [ main ]
 
 jobs:
-  build-android:
-    name: Build Pallets APK
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
-
+  build:
+    runs-on: ubuntu-22.04
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Check project files
-        run: |
-          test -f main.py || {
-            echo "ERROR: main.py not found"
-            exit 1
-          }
-
-          test -f buildozer.spec || {
-            echo "ERROR: buildozer.spec not found"
-            exit 1
-          }
-
-          test -d p4a-recipes || {
-            echo "ERROR: p4a-recipes folder not found"
-            exit 1
-          }
-
-          echo "Project files verified."
-
-      - name: Cache Buildozer
-        uses: actions/cache@v4
+      - uses: actions/checkout@v4
+      - name: Build APK
+        uses: digreatbrian/buildozer-action@v2
         with:
-          path: ~/.buildozer
-          key: pallets-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
-          restore-keys: |
-            pallets-${{ runner.os }}-
-
-      - name: Prepare build environment
-        run: |
-          mkdir -p "$HOME/.buildozer"
-          rm -rf "$HOME/.buildozer/android/platform/python-for-android"
-          rm -rf bin
-          
-      - name: Build Android APK
-        run: |
-          docker pull ghcr.io/kivy/buildozer:latest
-
-          docker run --rm \
-            -v "$GITHUB_WORKSPACE:/home/user/hostcwd" \
-            -v "$HOME/.buildozer:/home/user/.buildozer" \
-            -w /home/user/hostcwd \
-            ghcr.io/kivy/buildozer:latest \
-            android debug
-
-      - name: Verify APK
-        run: |
-          echo "Searching for APK..."
-
-          find bin -type f -name "*.apk"
-
-          test -n "$(find bin -type f -name '*.apk' -print -quit)" || {
-            echo "ERROR: APK was not generated"
-            exit 1
-          }
-
-          echo "APK successfully generated!"
-
-      - name: Upload APK
+          python-version: 3.11
+          buildozer-cmd: buildozer -v android debug
+      
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Pallets-Android-APK
-          path: bin/*.apk
-          if-no-files-found: error
-          retention-days: 14
+          name: package
+          path: ./bin/*.apk
