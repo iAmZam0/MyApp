@@ -1,26 +1,42 @@
 
-name: Build
+name: Build Android APK
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
 
 jobs:
   build-android:
     name: Build Android APK
     runs-on: ubuntu-latest
+    timeout-minutes: 120
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Build with Buildozer
-        uses: ArtemSBulgakov/buildozer-action@v1
-        id: buildozer
+      - name: Cache Buildozer
+        uses: actions/cache@v4
         with:
-          workdir: .
-          buildozer_version: stable
+          path: ~/.buildozer
+          key: buildozer-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+          restore-keys: |
+            buildozer-${{ runner.os }}-
+
+      - name: Build APK with official Kivy image
+        run: |
+          mkdir -p "$HOME/.buildozer"
+
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/home/user/hostcwd" \
+            -v "$HOME/.buildozer:/home/user/.buildozer" \
+            ghcr.io/kivy/buildozer:latest \
+            android debug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: android-apk
-          path: ${{ steps.buildozer.outputs.filename }}
+          path: bin/*.apk
+          if-no-files-found: error
