@@ -5,11 +5,14 @@ on:
   push:
     branches:
       - main
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
   build-android:
-    name: Build Android APK
+    name: Build Pallets APK
     runs-on: ubuntu-latest
     timeout-minutes: 120
 
@@ -17,30 +20,67 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Check project files
+        run: |
+          test -f main.py || {
+            echo "ERROR: main.py not found"
+            exit 1
+          }
+
+          test -f buildozer.spec || {
+            echo "ERROR: buildozer.spec not found"
+            exit 1
+          }
+
+          test -d p4a-recipes || {
+            echo "ERROR: p4a-recipes folder not found"
+            exit 1
+          }
+
+          echo "Project files verified."
+
       - name: Cache Buildozer
         uses: actions/cache@v4
         with:
-          path: .buildozer
-          key: buildozer-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+          path: ~/.buildozer
+          key: pallets-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
           restore-keys: |
-            buildozer-${{ runner.os }}-
+            pallets-${{ runner.os }}-
 
-      - name: Clean old python-for-android
+      - name: Prepare build environment
         run: |
-          rm -rf .buildozer/android/platform/python-for-android
+          mkdir -p "$HOME/.buildozer"
+          rm -rf "$HOME/.buildozer/android/platform/python-for-android"
+          rm -rf bin
+          
+      - name: Build Android APK
+        run: |
+          docker pull ghcr.io/kivy/buildozer:latest
 
-      - name: Build APK
-        run: |
           docker run --rm \
             -v "$GITHUB_WORKSPACE:/home/user/hostcwd" \
+            -v "$HOME/.buildozer:/home/user/.buildozer" \
             -w /home/user/hostcwd \
             ghcr.io/kivy/buildozer:latest \
             android debug
 
+      - name: Verify APK
+        run: |
+          echo "Searching for APK..."
+
+          find bin -type f -name "*.apk"
+
+          test -n "$(find bin -type f -name '*.apk' -print -quit)" || {
+            echo "ERROR: APK was not generated"
+            exit 1
+          }
+
+          echo "APK successfully generated!"
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: android-apk
+          name: Pallets-Android-APK
           path: bin/*.apk
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 14
