@@ -1,20 +1,59 @@
+
+name: Build Android APK
+
 on:
   push:
     branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-22.04
+
     steps:
       - uses: actions/checkout@v4
+
       - name: Build APK
         uses: digreatbrian/buildozer-action@v2
         with:
           python-version: 3.11
-          buildozer-cmd: buildozer -v android debug
-      
+          buildozer-cmd: |
+            python - <<'PY'
+            from pathlib import Path
+            import re
+
+            recipes = list(Path(".buildozer").rglob(
+                "pythonforandroid/recipes/libthorvg/__init__.py"
+            ))
+
+            if not recipes:
+                raise SystemExit("libthorvg recipe not found")
+
+            recipe = recipes[0]
+            source = recipe.read_text()
+
+            source = source.replace(
+                "-Dextra=opengl_es,lottie_exp,openmp",
+                "-Dextra=opengl_es,lottie_exp"
+            )
+
+            source, count = re.subn(
+                r'(?ms)^[ \t]*# copy libomp\.so.*?'
+                r'^[ \t]*shprint\(sh\.cp, libomp, join\("install", "lib"\)\)\n?',
+                '',
+                source
+            )
+
+            recipe.write_text(source)
+            print("Patched:", recipe)
+            print("Removed OpenMP copy blocks:", count)
+            PY
+
+            buildozer -v android debug
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: package
           path: ./bin/*.apk
+          if-no-files-found: error
