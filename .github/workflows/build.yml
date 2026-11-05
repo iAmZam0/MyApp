@@ -18,7 +18,7 @@ jobs:
         with:
           python-version: 3.11
           buildozer-cmd: |
-            echo "=== FIRST BUILD: DOWNLOAD DEPENDENCIES ==="
+            echo "=== PREPARING DEPENDENCIES ==="
             buildozer -v android debug || true
 
             echo "=== PATCHING LIBTHORVG ==="
@@ -33,67 +33,64 @@ jobs:
             ]
 
             recipes = []
+
             for root in roots:
                 if root.exists():
-                    recipes.extend(
-                        root.rglob("libthorvg/__init__.py")
-                    )
+                    recipes.extend(root.rglob("libthorvg/__init__.py"))
 
             recipes = list(dict.fromkeys(recipes))
 
             if not recipes:
                 raise SystemExit("ERROR: libthorvg recipe not found")
 
-            recipe = recipes[0]
-            print("Recipe:", recipe)
+            for recipe in recipes:
+                print("\nPatching:", recipe)
 
-            source = recipe.read_text()
+                source = recipe.read_text()
 
-            # Disable OpenMP.
-            source, config_count = re.subn(
-                r'(-Dextra=[^"\n]*)openmp',
-                lambda m: m.group(1).rstrip(","),
-                source
-            )
-
-            # Remove libomp from built_libraries.
-            source, library_count = re.subn(
-                r'^[ \t]*"libomp\.so":\s*"install/lib",?\s*\n',
-                '',
-                source,
-                flags=re.M
-            )
-
-            # Remove the complete Clang glob and libomp copy block.
-            source, block_count = re.subn(
-                r'(?ms)^[ \t]*# copy libomp\.so\s*\n'
-                r'.*?'
-                r'^[ \t]*shprint\(sh\.cp, libomp, join\("install", "lib"\)\)\s*\n?',
-                '',
-                source
-            )
-
-            if block_count == 0:
-                raise SystemExit(
-                    "ERROR: Could not remove the libomp copy block"
+                # Disable OpenMP.
+                source, config_count = re.subn(
+                    r'(-Dextra=[^"\n]*)openmp',
+                    lambda m: m.group(1).rstrip(","),
+                    source
                 )
 
-            if "clang_lib_dir = glob(pattern)[0]" in source:
-                raise SystemExit(
-                    "ERROR: Clang glob still exists in recipe"
+                # Remove libomp from built_libraries.
+                source, library_count = re.subn(
+                    r'^[ \t]*"libomp\.so":\s*"install/lib",?\s*\n',
+                    '',
+                    source,
+                    flags=re.M
                 )
 
-            recipe.write_text(source)
+                # Remove the entire optional libomp copy section.
+                source, block_count = re.subn(
+                    r'(?ms)^[ \t]*# copy libomp\.so.*?'
+                    r'^[ \t]*shprint\(sh\.cp, libomp, join\("install", "lib"\)\)[ \t]*\n?',
+                    '',
+                    source
+                )
 
-            print("OpenMP config changes:", config_count)
-            print("OpenMP library entries removed:", library_count)
-            print("Clang lookup blocks removed:", block_count)
-            print("PATCH SUCCESSFUL")
+                # Verify the unsafe lookup is gone.
+                if "clang_lib_dir = glob(pattern)[0]" in source:
+                    raise SystemExit(
+                        "ERROR: Unsafe Clang lookup remains in " + str(recipe)
+                    )
+
+                if "clang_lib_dir = glob(pattern)" in source:
+                    raise SystemExit(
+                        "ERROR: Clang lookup remains in " + str(recipe)
+                    )
+
+                recipe.write_text(source)
+
+                print("OpenMP config changes:", config_count)
+                print("Library entries removed:", library_count)
+                print("Copy blocks removed:", block_count)
+                print("PATCH VERIFIED")
+
+            print("\nALL RECIPES PATCHED")
             PY
-
-            echo "=== CLEANING FAILED THORVG BUILD ==="
-
-            rm -rf .buildozer/android/platform/build-arm64-v8a_armeabi-v7a/build/other_builds/libthorvg
 
             echo "=== SECOND BUILD ==="
             buildozer -v android debug
