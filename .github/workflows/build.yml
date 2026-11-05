@@ -18,11 +18,10 @@ jobs:
         with:
           python-version: 3.11
           buildozer-cmd: |
-            echo "=== PREPARING ANDROID DEPENDENCIES ==="
-
+            echo "=== FIRST BUILD: DOWNLOAD DEPENDENCIES ==="
             buildozer -v android debug || true
 
-            echo "=== LOCATING LIBTHORVG ==="
+            echo "=== PATCHING LIBTHORVG ==="
 
             python - <<'PY'
             from pathlib import Path
@@ -30,47 +29,73 @@ jobs:
 
             roots = [
                 Path(".buildozer"),
-                Path.home() / ".local",
+                Path.home() / ".buildozer",
             ]
 
             recipes = []
-
             for root in roots:
                 if root.exists():
                     recipes.extend(
-                        p for p in root.rglob("__init__.py")
-                        if p.parent.name == "libthorvg"
+                        root.rglob("libthorvg/__init__.py")
                     )
 
+            recipes = list(dict.fromkeys(recipes))
+
             if not recipes:
-                raise SystemExit(
-                    "ERROR: libthorvg was not found after preparation."
-                )
+                raise SystemExit("ERROR: libthorvg recipe not found")
 
             recipe = recipes[0]
             print("Recipe:", recipe)
 
             source = recipe.read_text()
 
-            source = re.sub(
-                r'(-Dextra=[^"\n]*),openmp',
-                r'\1',
+            # Disable OpenMP.
+            source, config_count = re.subn(
+                r'(-Dextra=[^"\n]*)openmp',
+                lambda m: m.group(1).rstrip(","),
                 source
             )
 
-            source = re.sub(
-                r'(?ms)^[ \t]*# copy libomp\.so.*?'
-                r'^[ \t]*shprint\(sh\.cp, libomp, join\("install", "lib"\)\)\n?',
+            # Remove libomp from built_libraries.
+            source, library_count = re.subn(
+                r'^[ \t]*"libomp\.so":\s*"install/lib",?\s*\n',
+                '',
+                source,
+                flags=re.M
+            )
+
+            # Remove the complete Clang glob and libomp copy block.
+            source, block_count = re.subn(
+                r'(?ms)^[ \t]*# copy libomp\.so\s*\n'
+                r'.*?'
+                r'^[ \t]*shprint\(sh\.cp, libomp, join\("install", "lib"\)\)\s*\n?',
                 '',
                 source
             )
 
+            if block_count == 0:
+                raise SystemExit(
+                    "ERROR: Could not remove the libomp copy block"
+                )
+
+            if "clang_lib_dir = glob(pattern)[0]" in source:
+                raise SystemExit(
+                    "ERROR: Clang glob still exists in recipe"
+                )
+
             recipe.write_text(source)
 
-            print("=== LIBTHORVG PATCH APPLIED ===")
+            print("OpenMP config changes:", config_count)
+            print("OpenMP library entries removed:", library_count)
+            print("Clang lookup blocks removed:", block_count)
+            print("PATCH SUCCESSFUL")
             PY
 
-            echo "=== BUILDING APK ==="
+            echo "=== CLEANING FAILED THORVG BUILD ==="
+
+            rm -rf .buildozer/android/platform/build-arm64-v8a_armeabi-v7a/build/other_builds/libthorvg
+
+            echo "=== SECOND BUILD ==="
             buildozer -v android debug
 
       - name: Upload artifacts
